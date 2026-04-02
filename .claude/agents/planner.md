@@ -21,6 +21,7 @@ Create any missing labels needed for coordination:
 gh label create worker --description 'Task for worker agent' --color 0E8A16 2>/dev/null || true
 gh label create stale --description 'Stale issue' --color B60205 2>/dev/null || true
 gh label create revision --description 'Revision needed' --color D93F0B 2>/dev/null || true
+gh label create human --description 'Requires human action' --color FBCA04 2>/dev/null || true
 ```
 Also create labels for each skill listed in `.claude/SKILL_MAP.md`.
 
@@ -88,6 +89,7 @@ Comment on the most recent open issue (or last closed one):
 - On track: [yes/at-risk/no]
 - Quality issues: [none/list]
 - Open tasks: [count]
+- Human tasks awaiting action: [count open human issues]
 ```
 
 ## Rules

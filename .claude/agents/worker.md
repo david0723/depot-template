@@ -43,6 +43,7 @@ Determine which issues are actionable:
 - Standalone issues (no `depends_on`) are always actionable.
 - **Priority**: Blocked issues are skipped. Among actionable issues, pick the lowest issue number (oldest first).
 - If an issue has a `revision` label, it was reopened by the planner with feedback. Read the latest comments for what to fix.
+- If an issue has a `human` label, skip it. This task requires human action.
 
 If no actionable issues: exit with "No actionable issues. Waiting for dependencies."
 

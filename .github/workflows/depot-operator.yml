@@ -1,0 +1,47 @@
+name: "Depot: Operator"
+
+on:
+  issues:
+    types: [opened, labeled]
+  issue_comment:
+    types: [created]
+
+concurrency:
+  group: depot-agents
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  operate:
+    # Only run when:
+    # 1. An issue is opened/labeled with 'operator' label
+    # 2. A human (not bot) comments on an operator issue
+    if: |
+      (github.event_name == 'issues' && contains(github.event.issue.labels.*.name, 'operator')) ||
+      (github.event_name == 'issue_comment' && contains(github.event.issue.labels.*.name, 'operator') && !endsWith(github.event.comment.user.login, '[bot]'))
+    runs-on: [self-hosted, depot]
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.DEPOT_TOKEN }}
+
+      - name: Configure git
+        run: |
+          git config user.name "${{ vars.GIT_USER_NAME || 'Depot Operator' }}"
+          git config user.email "${{ vars.GIT_USER_EMAIL || 'depot@noreply.github.com' }}"
+
+      - name: Run operator agent
+        run: |
+          claude --print --max-turns 20 --verbose \
+            -- "$(cat .claude/agents/operator.md)
+
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          ISSUE_TITLE: ${{ github.event.issue.title }}
+          REPO: ${{ github.repository }}"
+        env:
+          GH_TOKEN: ${{ secrets.DEPOT_TOKEN }}

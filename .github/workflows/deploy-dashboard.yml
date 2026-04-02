@@ -1,0 +1,115 @@
+name: Deploy Dashboard
+
+on:
+  issues:
+    types: [opened, closed, reopened, labeled]
+  workflow_run:
+    workflows: ["Depot: Worker", "Depot: Planner"]
+    types: [completed]
+  schedule:
+    - cron: "30 */4 * * *" # Every 4h, offset from worker
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Generate dashboard data
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          REPO="${{ github.repository }}"
+
+          # Fetch issues
+          OPEN_ISSUES=$(gh issue list --state open --label worker --json number,title,state,labels,createdAt,updatedAt --limit 50)
+          CLOSED_ISSUES=$(gh issue list --state closed --label worker --json number,title,state,labels,createdAt,updatedAt,closedAt --limit 20)
+          ALL_ISSUES=$(echo "$OPEN_ISSUES $CLOSED_ISSUES" | jq -s 'add | sort_by(.updatedAt) | reverse | .[0:30] | [.[] | {number, title, state, labels: [.labels[].name], created_at: .createdAt, updated_at: .updatedAt}]')
+
+          # Stats
+          OPEN_COUNT=$(echo "$OPEN_ISSUES" | jq 'length')
+          TODAY=$(date -u +%Y-%m-%d)
+          WEEK_AGO=$(date -u -d '7 days ago' +%Y-%m-%d 2>/dev/null || date -u -v-7d +%Y-%m-%d)
+          CLOSED_TODAY=$(echo "$CLOSED_ISSUES" | jq --arg d "$TODAY" '[.[] | select(.closedAt[:10] == $d)] | length')
+          CLOSED_WEEK=$(echo "$CLOSED_ISSUES" | jq --arg d "$WEEK_AGO" '[.[] | select(.closedAt >= $d)] | length')
+
+          # Current edition (count research issues)
+          EDITION=$(gh issue list --state all --label research --json number --jq 'length')
+
+          # Pipeline status for current edition
+          RESEARCH=$(echo "$ALL_ISSUES" | jq --arg e "[Edition $EDITION]" '[.[] | select(.title | contains($e)) | select(.labels | index("research"))] | if length > 0 then .[0] else null end')
+          DRAFT=$(echo "$ALL_ISSUES" | jq --arg e "[Edition $EDITION]" '[.[] | select(.title | contains($e)) | select(.labels | index("draft"))] | if length > 0 then .[0] else null end')
+          REVIEW=$(echo "$ALL_ISSUES" | jq --arg e "[Edition $EDITION]" '[.[] | select(.title | contains($e)) | select(.labels | index("review"))] | if length > 0 then .[0] else null end')
+
+          step_status() {
+            local data="$1"
+            if [ "$data" = "null" ]; then echo "pending"; return; fi
+            echo "$data" | jq -r '.state // "pending" | ascii_downcase'
+          }
+          step_issue() {
+            local data="$1"
+            if [ "$data" = "null" ]; then echo "null"; return; fi
+            echo "$data" | jq '.number'
+          }
+
+          # Recent workflow runs
+          RUNS=$(gh run list --limit 10 --json databaseId,name,status,conclusion,createdAt \
+            | jq '[.[] | {id: .databaseId, name, conclusion, created_at: .createdAt}]')
+
+          # Read description from CLAUDE.md
+          DESC=$(head -5 CLAUDE.md | grep -o 'Weekly.*' | head -1)
+
+          # Build data.json
+          cat > dashboard/data.json << DATAJSON
+          {
+            "factory": {
+              "name": "depot",
+              "description": "${DESC:-AI Newsletter Dark Factory}",
+              "repo": "$REPO"
+            },
+            "stats": {
+              "open_tasks": $OPEN_COUNT,
+              "closed_today": $CLOSED_TODAY,
+              "closed_this_week": $CLOSED_WEEK,
+              "total_closed": $(echo "$CLOSED_ISSUES" | jq 'length')
+            },
+            "pipeline": {
+              "current_edition": $EDITION,
+              "steps": [
+                {"name": "Research", "status": "$(step_status "$RESEARCH")", "issue": $(step_issue "$RESEARCH")},
+                {"name": "Draft", "status": "$(step_status "$DRAFT")", "issue": $(step_issue "$DRAFT")},
+                {"name": "Review", "status": "$(step_status "$REVIEW")", "issue": $(step_issue "$REVIEW")}
+              ]
+            },
+            "issues": $ALL_ISSUES,
+            "runs": $RUNS,
+            "updated_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          }
+          DATAJSON
+
+          echo "Dashboard data generated:"
+          cat dashboard/data.json | jq '{stats, pipeline, issue_count: (.issues | length), run_count: (.runs | length)}'
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dashboard
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/deploy-pages@v4
+        id: deployment

@@ -1,0 +1,48 @@
+name: "Depot: Worker"
+
+on:
+  schedule:
+    - cron: "0 */4 * * *" # Every 4 hours
+  workflow_dispatch: # Manual trigger
+
+concurrency:
+  group: depot-agents
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  work:
+    runs-on: [self-hosted, depot]
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure git
+        run: |
+          git config user.name "${{ vars.GIT_USER_NAME || 'Depot Agent' }}"
+          git config user.email "${{ vars.GIT_USER_EMAIL || 'depot@noreply.github.com' }}"
+
+      - name: Check for open tasks
+        id: check
+        run: |
+          OPEN=$(gh issue list --state open --label worker --json number --jq length)
+          echo "open_tasks=$OPEN" >> "$GITHUB_OUTPUT"
+          if [ "$OPEN" -eq 0 ]; then
+            echo "No open tasks. Skipping."
+          else
+            echo "Found $OPEN open tasks."
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Run worker agent
+        if: steps.check.outputs.open_tasks != '0'
+        run: |
+          claude --print --max-turns 50 --verbose \
+            -- "$(cat .claude/agents/worker.md)"
+        env:
+          GH_TOKEN: ${{ github.token }}

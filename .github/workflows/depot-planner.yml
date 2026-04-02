@@ -1,0 +1,34 @@
+name: "Depot: Planner"
+
+on:
+  schedule:
+    - cron: "0 9 * * 1" # Monday 9am UTC
+  workflow_dispatch: # Manual trigger
+
+concurrency:
+  group: depot-agents
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  plan:
+    runs-on: [self-hosted, depot]
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure git
+        run: |
+          git config user.name "${{ vars.GIT_USER_NAME || 'Depot Agent' }}"
+          git config user.email "${{ vars.GIT_USER_EMAIL || 'depot@noreply.github.com' }}"
+
+      - name: Run planner agent
+        run: |
+          claude --print --max-turns 30 --verbose \
+            -- "$(cat .claude/agents/planner.md)"
+        env:
+          GH_TOKEN: ${{ github.token }}

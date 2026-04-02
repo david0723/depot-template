@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Depot Dashboard</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: { mono: ['JetBrains Mono', 'Fira Code', 'monospace'] }
+        }
+      }
+    }
+  </script>
+  <style>
+    body { font-family: 'Inter', system-ui, sans-serif; }
+    .mono { font-family: 'JetBrains Mono', 'Fira Code', monospace; }
+  </style>
+</head>
+<body class="bg-zinc-950 text-zinc-100 min-h-screen">
+  <div id="app" class="max-w-4xl mx-auto px-4 py-8">
+    <header class="mb-8">
+      <h1 class="text-2xl font-bold mono">depot</h1>
+      <p class="text-zinc-500 text-sm mt-1" id="subtitle">loading...</p>
+    </header>
+
+    <!-- Stats -->
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-8" id="stats"></div>
+
+    <!-- Pipeline -->
+    <section class="mb-8">
+      <h2 class="text-sm font-medium text-zinc-400 mb-3">Current Pipeline</h2>
+      <div id="pipeline" class="flex gap-2 items-center"></div>
+    </section>
+
+    <!-- Activity -->
+    <section class="mb-8">
+      <h2 class="text-sm font-medium text-zinc-400 mb-3">Recent Activity</h2>
+      <div id="activity" class="space-y-2"></div>
+    </section>
+
+    <!-- Runs -->
+    <section class="mb-8">
+      <h2 class="text-sm font-medium text-zinc-400 mb-3">Agent Runs</h2>
+      <div id="runs" class="space-y-2"></div>
+    </section>
+
+    <footer class="text-xs text-zinc-600 mt-12">
+      Updated <span id="updated"></span>
+    </footer>
+  </div>
+
+  <script>
+    const LABEL_COLORS = {
+      research: 'bg-blue-500/15 text-blue-400 border-blue-500/30',
+      draft: 'bg-amber-500/15 text-amber-400 border-amber-500/30',
+      review: 'bg-rose-500/15 text-rose-400 border-rose-500/30',
+      worker: 'bg-green-500/15 text-green-400 border-green-500/30',
+      revision: 'bg-orange-500/15 text-orange-400 border-orange-500/30',
+      stale: 'bg-red-500/15 text-red-400 border-red-500/30',
+      pipeline: 'bg-indigo-500/15 text-indigo-400 border-indigo-500/30',
+    };
+
+    function badge(label) {
+      const cls = LABEL_COLORS[label] || 'bg-zinc-500/15 text-zinc-400 border-zinc-500/30';
+      return `<span class="inline-block px-1.5 py-0.5 text-[10px] mono border rounded ${cls}">${label}</span>`;
+    }
+
+    function timeAgo(date) {
+      const s = Math.floor((Date.now() - new Date(date).getTime()) / 1000);
+      if (s < 60) return `${s}s ago`;
+      const m = Math.floor(s / 60);
+      if (m < 60) return `${m}m ago`;
+      const h = Math.floor(m / 60);
+      if (h < 24) return `${h}h ago`;
+      const d = Math.floor(h / 24);
+      return `${d}d ago`;
+    }
+
+    function statCard(label, value, sub) {
+      return `
+        <div class="bg-zinc-900 border border-zinc-800 rounded-lg p-4">
+          <div class="text-[11px] text-zinc-500 uppercase tracking-wide">${label}</div>
+          <div class="text-2xl font-bold mono mt-1">${value}</div>
+          <div class="text-[11px] text-zinc-600">${sub}</div>
+        </div>`;
+    }
+
+    function pipelineStep(step) {
+      const colors = {
+        closed: 'bg-green-500 border-green-400',
+        open: 'bg-amber-500 border-amber-400 animate-pulse',
+        pending: 'bg-zinc-700 border-zinc-600',
+      };
+      const dot = colors[step.status] || colors.pending;
+      const issueLink = step.issue
+        ? `<a href="https://github.com/${window._data.factory.repo}/issues/${step.issue}" class="hover:text-zinc-200">#${step.issue}</a>`
+        : '';
+      return `
+        <div class="flex items-center gap-2">
+          <div class="w-3 h-3 rounded-full border ${dot}"></div>
+          <span class="text-sm">${step.name}</span>
+          <span class="text-xs text-zinc-600 mono">${issueLink}</span>
+        </div>`;
+    }
+
+    function issueRow(issue) {
+      const stateColor = issue.state === 'closed'
+        ? 'text-purple-400' : 'text-green-400';
+      const labels = issue.labels.map(badge).join(' ');
+      const url = `https://github.com/${window._data.factory.repo}/issues/${issue.number}`;
+      return `
+        <div class="flex items-start gap-3 py-2 border-b border-zinc-800/50">
+          <span class="mono text-xs text-zinc-600 w-8 shrink-0">#${issue.number}</span>
+          <div class="flex-1 min-w-0">
+            <a href="${url}" class="text-sm hover:text-zinc-200 block truncate">${issue.title}</a>
+            <div class="flex gap-1 mt-1">${labels}</div>
+          </div>
+          <div class="text-right shrink-0">
+            <span class="text-xs ${stateColor} mono">${issue.state}</span>
+            <div class="text-[10px] text-zinc-600">${timeAgo(issue.updated_at)}</div>
+          </div>
+        </div>`;
+    }
+
+    function runRow(run) {
+      const icon = {
+        success: '<span class="text-green-400">ok</span>',
+        failure: '<span class="text-red-400">fail</span>',
+        cancelled: '<span class="text-zinc-500">skip</span>',
+        skipped: '<span class="text-zinc-500">skip</span>',
+      };
+      const url = `https://github.com/${window._data.factory.repo}/actions/runs/${run.id}`;
+      return `
+        <div class="flex items-center gap-3 py-2 border-b border-zinc-800/50">
+          <span class="mono text-xs w-10">${icon[run.conclusion] || '<span class="text-zinc-500">?</span>'}</span>
+          <a href="${url}" class="text-sm flex-1 hover:text-zinc-200">${run.name}</a>
+          <span class="text-[10px] text-zinc-600">${timeAgo(run.created_at)}</span>
+        </div>`;
+    }
+
+    async function render() {
+      try {
+        const res = await fetch('data.json');
+        const data = await res.json();
+        window._data = data;
+
+        document.getElementById('subtitle').textContent =
+          `${data.factory.description} · ${data.factory.repo}`;
+
+        document.getElementById('stats').innerHTML = [
+          statCard('Open Tasks', data.stats.open_tasks, 'in queue'),
+          statCard('Closed Today', data.stats.closed_today, 'completed'),
+          statCard('This Week', data.stats.closed_this_week, 'completed'),
+          statCard('Edition', data.pipeline.current_edition, 'current'),
+        ].join('');
+
+        const arrow = '<span class="text-zinc-700 text-lg">&#8594;</span>';
+        document.getElementById('pipeline').innerHTML =
+          data.pipeline.steps.map(pipelineStep).join(arrow);
+
+        document.getElementById('activity').innerHTML =
+          data.issues.length
+            ? data.issues.map(issueRow).join('')
+            : '<p class="text-sm text-zinc-600">No recent activity</p>';
+
+        document.getElementById('runs').innerHTML =
+          data.runs.length
+            ? data.runs.map(runRow).join('')
+            : '<p class="text-sm text-zinc-600">No recent runs</p>';
+
+        document.getElementById('updated').textContent =
+          new Date(data.updated_at).toLocaleString();
+      } catch (e) {
+        document.getElementById('app').innerHTML =
+          `<p class="text-red-400">Failed to load dashboard data: ${e.message}</p>`;
+      }
+    }
+
+    render();
+  </script>
+</body>
+</html>

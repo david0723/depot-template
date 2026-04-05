@@ -3,6 +3,8 @@ name: "Depot: Worker"
 on:
   schedule:
     - cron: "0 */4 * * *" # Every 4 hours
+  issues:
+    types: [opened, labeled] # React to new/labeled tasks
   workflow_dispatch: # Manual trigger
 
 concurrency:
@@ -15,6 +17,11 @@ permissions:
 
 jobs:
   work:
+    if: >
+      github.event_name == 'schedule' ||
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'issues' &&
+       contains(github.event.issue.labels.*.name, 'worker'))
     runs-on: [self-hosted, depot]
     timeout-minutes: 60
     steps:

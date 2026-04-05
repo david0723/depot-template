@@ -1,0 +1,101 @@
+{
+  "generated_at": "2026-04-05T17:39:17.686Z",
+  "agents": [
+    {
+      "name": "operator",
+      "description": "Translates user intent from GitHub Issues into factory configuration changes. Can bootstrap new skills, pipelines, and workflows.",
+      "workflow": "depot-operator.yml",
+      "triggers": [
+        {
+          "type": "issues",
+          "types": [
+            "opened",
+            "labeled"
+          ]
+        },
+        {
+          "type": "issue_comment",
+          "types": [
+            "created"
+          ]
+        }
+      ],
+      "concurrency": "depot-agents",
+      "timeout_minutes": 15
+    },
+    {
+      "name": "planner",
+      "description": "Creates pipeline issues, monitors progress, reviews worker output quality.",
+      "workflow": "depot-planner.yml",
+      "triggers": [
+        {
+          "type": "schedule",
+          "cron": "0 9 * * 1"
+        },
+        {
+          "type": "workflow_dispatch"
+        }
+      ],
+      "concurrency": "depot-agents",
+      "timeout_minutes": 30
+    },
+    {
+      "name": "worker",
+      "description": "Picks up tasks from GitHub issues, executes using project skills, commits results.",
+      "workflow": "depot-worker.yml",
+      "triggers": [
+        {
+          "type": "schedule",
+          "cron": "0 */4 * * *"
+        },
+        {
+          "type": "issues",
+          "types": [
+            "opened",
+            "labeled"
+          ]
+        },
+        {
+          "type": "workflow_dispatch"
+        }
+      ],
+      "concurrency": "depot-agents",
+      "timeout_minutes": 60
+    }
+  ],
+  "pipelines": [
+    {
+      "name": "example",
+      "description": "Example pipeline showing the format. Replace with your own.",
+      "schedule": "weekly",
+      "steps": [
+        {
+          "name": "First Step",
+          "labels": [
+            "worker",
+            "first-step-label"
+          ],
+          "depends_on": null,
+          "skill": "first-step"
+        },
+        {
+          "name": "Second Step",
+          "labels": [
+            "worker",
+            "second-step-label"
+          ],
+          "depends_on": "First Step issue (planner links by issue number)",
+          "skill": "second-step"
+        }
+      ]
+    }
+  ],
+  "skills": [
+    {
+      "name": "example",
+      "description": "Example skill showing the format. Replace this with your own skill.",
+      "label": "example",
+      "file": ".claude/skills/example.md"
+    }
+  ]
+}

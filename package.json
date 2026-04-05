@@ -1,0 +1,10 @@
+{
+  "name": "depot-template",
+  "private": true,
+  "scripts": {
+    "architecture": "node scripts/generate-architecture.js"
+  },
+  "dependencies": {
+    "js-yaml": "^4.1.0"
+  }
+}

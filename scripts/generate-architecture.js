@@ -154,3 +154,191 @@ function parseSkillMap() {
 
   return skills;
 }
+
+function buildManifest() {
+  const workflows = parseWorkflows();
+  const agents = parseAgents();
+  const pipelines = parsePipelines();
+  const skills = parseSkillMap();
+
+  const mergedAgents = agents.map(agent => {
+    const workflow = workflows.find(w => w.name === agent.name);
+    return {
+      name: agent.name,
+      description: agent.description,
+      workflow: workflow?.file || null,
+      triggers: workflow?.triggers || [],
+      concurrency: workflow?.concurrency || null,
+      timeout_minutes: workflow?.timeout_minutes || null,
+    };
+  });
+
+  return {
+    generated_at: new Date().toISOString(),
+    agents: mergedAgents,
+    pipelines,
+    skills,
+  };
+}
+
+function capitalize(str) {
+  return str.charAt(0).toUpperCase() + str.slice(1);
+}
+
+function renderMermaid(manifest) {
+  const lines = ['graph TD'];
+
+  // Agents subgraph
+  lines.push('    subgraph Agents');
+  for (const agent of manifest.agents) {
+    const triggerParts = agent.triggers
+      .map(t => {
+        if (t.type === 'schedule') return '⏰ ' + t.cron;
+        if (t.type === 'issues') return '📋 issues:' + t.types.join(',');
+        if (t.type === 'issue_comment') return '💬 issue_comment';
+        return null;
+      })
+      .filter(Boolean);
+
+    const labelParts = [capitalize(agent.name), ...triggerParts];
+    const label = labelParts.join('<br/>');
+    lines.push('        ' + agent.name + '["' + label + '"]');
+  }
+  lines.push('    end');
+  lines.push('');
+
+  // Pipeline subgraphs
+  for (const pipeline of manifest.pipelines) {
+    const scheduleLabel = pipeline.schedule ? ' (' + pipeline.schedule + ')' : '';
+    lines.push('    subgraph "Pipeline: ' + pipeline.name + scheduleLabel + '"');
+
+    const stepIds = [];
+    for (let i = 0; i < pipeline.steps.length; i++) {
+      const step = pipeline.steps[i];
+      const stepId = pipeline.name + '_step' + (i + 1);
+      stepIds.push(stepId);
+      lines.push('        ' + stepId + '["' + step.name + '"]');
+    }
+
+    // Step dependency edges
+    for (let i = 0; i < pipeline.steps.length; i++) {
+      const step = pipeline.steps[i];
+      if (step.depends_on) {
+        const depIndex = pipeline.steps.findIndex(s =>
+          step.depends_on.includes(s.name)
+        );
+        if (depIndex >= 0) {
+          lines.push('        ' + stepIds[depIndex] + ' --> ' + stepIds[i]);
+        }
+      }
+    }
+
+    lines.push('    end');
+    lines.push('');
+  }
+
+  // Skills subgraph
+  if (manifest.skills.length > 0) {
+    lines.push('    subgraph Skills');
+    for (const skill of manifest.skills) {
+      lines.push('        skill_' + skill.name + '["' + skill.name + '"]');
+    }
+    lines.push('    end');
+    lines.push('');
+  }
+
+  // Cross-cutting edges
+  for (const pipeline of manifest.pipelines) {
+    for (let i = 0; i < pipeline.steps.length; i++) {
+      const step = pipeline.steps[i];
+      const stepId = pipeline.name + '_step' + (i + 1);
+
+      if (manifest.agents.find(a => a.name === 'planner')) {
+        lines.push('    planner -- "creates issues" --> ' + stepId);
+      }
+
+      if (step.labels.includes('worker') && manifest.agents.find(a => a.name === 'worker')) {
+        lines.push('    worker -- "executes" --> ' + stepId);
+      }
+
+      if (step.skill) {
+        const skillNode = manifest.skills.find(s => s.name === step.skill);
+        if (skillNode) {
+          lines.push('    ' + stepId + ' -. "skill: ' + step.skill + '" .-> skill_' + skillNode.name);
+        }
+      }
+    }
+  }
+
+  return lines.join('\n');
+}
+
+function writeOutput(manifest, mermaidDiagram) {
+  const docsDir = path.join(ROOT, 'docs');
+  if (!fs.existsSync(docsDir)) fs.mkdirSync(docsDir, { recursive: true });
+
+  // Write JSON manifest
+  fs.writeFileSync(
+    path.join(docsDir, 'architecture.json'),
+    JSON.stringify(manifest, null, 2) + '\n'
+  );
+
+  // Build markdown
+  const agentRows = manifest.agents.map(a => {
+    const triggers = a.triggers.map(t => {
+      if (t.type === 'schedule') return 'schedule: ' + t.cron;
+      if (t.type === 'issues') return 'issues: ' + t.types.join(', ');
+      if (t.type === 'issue_comment') return 'issue_comment';
+      return t.type;
+    }).join(', ');
+    return '| ' + a.name + ' | ' + triggers + ' | ' + (a.timeout_minutes || '-') + 'm |';
+  }).join('\n');
+
+  const pipelineSections = manifest.pipelines.map(p => {
+    const stepList = p.steps.map((s, i) => {
+      const dep = s.depends_on ? ' (depends on: ' + s.depends_on + ')' : '';
+      return (i + 1) + '. **' + s.name + '** -> skill: ' + (s.skill || 'none') + dep;
+    }).join('\n');
+    return '### ' + p.name + ' (' + (p.schedule || 'manual') + ')\n\n' + stepList;
+  }).join('\n\n');
+
+  const skillRows = manifest.skills.map(s =>
+    '| ' + s.name + ' | ' + s.description + ' |'
+  ).join('\n');
+
+  const markdown = [
+    '# Factory Architecture',
+    '',
+    '> Auto-generated by `npm run architecture`. Do not edit manually.',
+    '> Generated: ' + manifest.generated_at,
+    '',
+    '```mermaid',
+    mermaidDiagram,
+    '```',
+    '',
+    '## Agents',
+    '',
+    '| Agent | Triggers | Timeout |',
+    '|-------|----------|---------|',
+    agentRows,
+    '',
+    '## Pipelines',
+    '',
+    pipelineSections,
+    '',
+    '## Skills',
+    '',
+    '| Skill | Description |',
+    '|-------|-------------|',
+    skillRows,
+    '',
+  ].join('\n');
+
+  fs.writeFileSync(path.join(docsDir, 'architecture.md'), markdown);
+}
+
+// Main
+const manifest = buildManifest();
+const mermaid = renderMermaid(manifest);
+writeOutput(manifest, mermaid);
+console.log('Generated docs/architecture.json and docs/architecture.md');

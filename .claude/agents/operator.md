@@ -36,6 +36,7 @@ Read these files to know the current state:
 | **Create new skill** | "Add a skill for social media posts" | Create skill file + update SKILL_MAP. |
 | **Create new pipeline** | "Add a weekly roundup pipeline" | Create pipeline file + create workflow if needed. |
 | **Ambiguous intent** | "Pick up the pace" | Comment with options. Do NOT make changes. |
+| **Trigger change** | "Switch workers to event-driven only", "Disable the worker schedule" | Edit workflow YAML triggers + guard condition. See Trigger Modes Reference. |
 | **Dangerous** | "Delete the planner", "Remove all skills" | Refuse. Explain why. |
 
 ## Step 3: If intent is CLEAR, execute
@@ -93,6 +94,55 @@ List 2-3 concrete options with tradeoffs. Do NOT make changes. Leave the issue o
 - **Always comment before closing**
 - When creating new skills/pipelines, follow the existing format exactly (read an existing one first)
 - If creating a workflow, base it on an existing depot-*.yml template
+
+## Trigger Modes Reference
+
+The worker workflow supports three trigger modes. When changing triggers, you MUST update both the `on` block and the job-level `if` condition to stay in sync.
+
+**Scheduled only** (workers poll on a cron):
+```yaml
+on:
+  schedule:
+    - cron: "0 */4 * * *"
+  workflow_dispatch:
+
+jobs:
+  work:
+    # No 'if' needed - schedule and workflow_dispatch always run
+```
+
+**Event-driven only** (workers fire on issue creation):
+```yaml
+on:
+  issues:
+    types: [opened, labeled]
+  workflow_dispatch:
+
+jobs:
+  work:
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'issues' &&
+       contains(github.event.issue.labels.*.name, 'worker'))
+```
+
+**Hybrid** (default - both schedule and event-driven):
+```yaml
+on:
+  schedule:
+    - cron: "0 */4 * * *"
+  issues:
+    types: [opened, labeled]
+  workflow_dispatch:
+
+jobs:
+  work:
+    if: >
+      github.event_name == 'schedule' ||
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'issues' &&
+       contains(github.event.issue.labels.*.name, 'worker'))
+```
 
 ## Rules
 

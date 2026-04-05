@@ -21,6 +21,20 @@ Everything runs on a self-hosted GitHub Actions runner using Claude Code with a 
 4. Create your first skill and pipeline (manually or via operator)
 5. Trigger a test run: `gh workflow run "Depot: Worker"`
 
+## Trigger Modes
+
+Workers can be triggered in three modes:
+
+| Mode | Triggers on | Best for |
+|------|------------|----------|
+| **Scheduled** | Fixed cron interval | Cost-conscious, batch workloads |
+| **Event-driven** | Issue created/labeled | Maximum responsiveness |
+| **Hybrid** (default) | Both schedule + issues | Resilience (missed events don't stall work) |
+
+The template ships with hybrid mode. To change it:
+- Edit `.github/workflows/depot-worker.yml` directly, or
+- Create an operator issue: "Switch workers to event-driven only"
+
 ## Structure
 
 ```
